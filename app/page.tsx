@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type ErrorItem = {
@@ -131,7 +132,7 @@ export default function Home() {
           <button className={section === "words" ? "nav-active" : ""} onClick={() => setSection("words")}><span>◫</span> My words <b>{words.length}</b></button>
         </nav>
         <div className="streak"><span>◆</span><strong>7</strong><small>day streak</small></div>
-        <button className="avatar" aria-label="Open profile">AK</button>
+        <Link className="avatar" href="/profile" aria-label="Open profile">AK</Link>
       </header>
 
       {section === "writing" ? (
