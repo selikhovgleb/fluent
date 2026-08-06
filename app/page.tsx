@@ -10,6 +10,8 @@ type ErrorItem = {
   note: string;
 };
 
+type CorrectionResult = { corrected: string; found: ErrorItem[] };
+
 type Word = {
   id: number;
   word: string;
@@ -71,10 +73,27 @@ function HighlightedText({ text, errors }: { text: string; errors: ErrorItem[] }
   );
 }
 
+function readPreferences() {
+  const defaults = { explanationLanguage: "English", translationLanguage: "Polish", storeSentences: false, proficiency: "B1-B2" };
+  try {
+    const stored = localStorage.getItem("fluent-profile");
+    if (!stored) return defaults;
+    const profile = JSON.parse(stored) as { explanationLanguage?: string; translationLanguage?: string; storeSentences?: boolean; level?: string };
+    const proficiency = profile.level?.includes("A1") ? "A1-A2" : profile.level?.includes("C1") ? "C1-C2" : "B1-B2";
+    return {
+      explanationLanguage: profile.explanationLanguage || defaults.explanationLanguage,
+      translationLanguage: profile.translationLanguage || defaults.translationLanguage,
+      storeSentences: profile.storeSentences === true,
+      proficiency,
+    };
+  } catch { return defaults; }
+}
+
 export default function Home() {
   const [section, setSection] = useState<"writing" | "words">("writing");
   const [text, setText] = useState(demo);
-  const [result, setResult] = useState(() => analyse(demo));
+  const [result, setResult] = useState<CorrectionResult>(() => analyse(demo));
+  const [score, setScore] = useState(86);
   const [analysedText, setAnalysedText] = useState(demo);
   const [words, setWords] = useState<Word[]>(seedWords);
   const [word, setWord] = useState("");
@@ -82,6 +101,10 @@ export default function Home() {
   const [example, setExample] = useState("");
   const [currentWord, setCurrentWord] = useState(0);
   const [saved, setSaved] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [aiMessage, setAiMessage] = useState("");
+  const [vocabLoading, setVocabLoading] = useState(false);
+  const [vocabMessage, setVocabMessage] = useState("");
 
   useEffect(() => {
     const stored = localStorage.getItem("fluent-words");
@@ -98,20 +121,69 @@ export default function Home() {
     return [...counts.entries()];
   }, [result]);
 
-  function checkWriting() {
+  async function checkWriting() {
     if (!text.trim()) return;
     setAnalysedText(text.trim());
-    setResult(analyse(text));
     setSaved(false);
+    setChecking(true);
+    setAiMessage("");
+    const preferences = readPreferences();
+    try {
+      const response = await fetch("/api/corrections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          dialect: "en-US",
+          tone: "professional-natural",
+          explanationLanguage: preferences.explanationLanguage,
+          proficiency: preferences.proficiency,
+          storeSentence: preferences.storeSentences,
+        }),
+      });
+      const payload = await response.json() as { corrected?: string; found?: ErrorItem[]; score?: number; error?: string };
+      if (!response.ok || !payload.corrected || !payload.found) throw new Error(payload.error || "AI correction is unavailable.");
+      setResult({ corrected: payload.corrected, found: payload.found });
+      setScore(payload.score ?? 100);
+      setAiMessage(preferences.storeSentences ? "AI analysis · sentence history on" : "AI analysis · private mode");
+    } catch (error) {
+      const fallback = analyse(text);
+      setResult(fallback);
+      setScore(Math.max(72, 100 - fallback.found.length * 7));
+      setAiMessage(`${error instanceof Error ? error.message : "AI unavailable"} Showing local checks.`);
+    } finally {
+      setChecking(false);
+    }
   }
 
-  function addWord(event: FormEvent) {
+  async function addWord(event: FormEvent) {
     event.preventDefault();
-    if (!word.trim() || !translation.trim()) return;
-    setWords((all) => [{ id: Date.now(), word: word.trim(), translation: translation.trim(), example: example.trim(), level: 1 }, ...all]);
-    setWord("");
-    setTranslation("");
-    setExample("");
+    if (!word.trim()) return;
+    setVocabLoading(true);
+    setVocabMessage("");
+    try {
+      const preferences = readPreferences();
+      const response = await fetch("/api/vocabulary/enrich", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word, context: example, targetLanguage: preferences.translationLanguage }),
+      });
+      const payload = await response.json() as { entry?: { word: string; translation: string; example: string }; error?: string };
+      if (!response.ok || !payload.entry) throw new Error(payload.error || "Vocabulary enrichment is unavailable.");
+      setWords((all) => [{ id: Date.now(), word: payload.entry!.word, translation: payload.entry!.translation, example: payload.entry!.example, level: 1 }, ...all]);
+      setVocabMessage(`AI added a ${preferences.translationLanguage} translation and example.`);
+      setWord(""); setTranslation(""); setExample("");
+    } catch (error) {
+      if (translation.trim()) {
+        setWords((all) => [{ id: Date.now(), word: word.trim(), translation: translation.trim(), example: example.trim(), level: 1 }, ...all]);
+        setWord(""); setTranslation(""); setExample("");
+        setVocabMessage("Saved your manual entry. AI enrichment is currently unavailable.");
+      } else {
+        setVocabMessage(error instanceof Error ? error.message : "AI enrichment is unavailable.");
+      }
+    } finally {
+      setVocabLoading(false);
+    }
   }
 
   function removeWord(id: number) {
@@ -156,7 +228,8 @@ export default function Home() {
             <div className="editor-card">
               <div className="card-heading"><div><span className="step">01</span><h2>Your sentence</h2></div><span className="shortcut">Ctrl + Enter</span></div>
               <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.ctrlKey && e.key === "Enter") checkWriting(); }} maxLength={500} aria-label="Sentence to check" />
-              <div className="editor-footer"><span>{text.length} / 500</span><button className="primary" onClick={checkWriting}>Check my English <span>→</span></button></div>
+              <div className="editor-footer"><span>{text.length} / 500</span><button className="primary" onClick={checkWriting} disabled={checking}>{checking ? "Analysing…" : "Check my English"} <span>→</span></button></div>
+              {aiMessage && <p className={aiMessage.includes("local checks") ? "service-message warning" : "service-message"}>{aiMessage}</p>}
             </div>
 
             <div className="result-card">
@@ -169,7 +242,7 @@ export default function Home() {
 
           <section className="feedback-grid">
             <div className="mistakes-panel">
-              <div className="section-title"><div><p className="eyebrow">YOUR FEEDBACK</p><h2>{result.found.length ? `${result.found.length} things to learn` : "Beautifully written"}</h2></div><span className="score">{result.found.length ? Math.max(72, 100 - result.found.length * 7) : 100}<small>/100</small></span></div>
+              <div className="section-title"><div><p className="eyebrow">YOUR FEEDBACK</p><h2>{result.found.length ? `${result.found.length} things to learn` : "Beautifully written"}</h2></div><span className="score">{score}<small>/100</small></span></div>
               <p className="original"><HighlightedText text={analysedText} errors={result.found} /></p>
               <div className="error-list">
                 {result.found.length ? result.found.map((error, index) => (
@@ -198,9 +271,10 @@ export default function Home() {
               <form className="word-form" onSubmit={addWord}>
                 <div className="card-heading"><div><span className="step">01</span><h2>Add to your collection</h2></div></div>
                 <label>English word<input id="new-word" value={word} onChange={(e) => setWord(e.target.value)} placeholder="e.g. thoughtful" /></label>
-                <label>Translation<input value={translation} onChange={(e) => setTranslation(e.target.value)} placeholder="e.g. troskliwy" /></label>
+                <label>Translation <span>(AI generated or optional)</span><input value={translation} onChange={(e) => setTranslation(e.target.value)} placeholder="Leave blank for AI" /></label>
                 <label>Example sentence <span>(optional)</span><input value={example} onChange={(e) => setExample(e.target.value)} placeholder="Use it in a sentence you’ll remember" /></label>
-                <button className="primary" type="submit">Add word <span>→</span></button>
+                <button className="primary" type="submit" disabled={vocabLoading}>{vocabLoading ? "Creating entry…" : "Add word"} <span>→</span></button>
+                {vocabMessage && <p className="service-message vocab-service-message">{vocabMessage}</p>}
               </form>
 
               <div className="collection-heading"><div><p className="eyebrow">YOUR COLLECTION</p><h2>{words.length} words in rotation</h2></div><span>Saved on this device</span></div>

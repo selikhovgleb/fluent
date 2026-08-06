@@ -1,0 +1,6 @@
+[
+  { "word": "overlook", "context": "I overlooked one detail.", "targetLanguage": "Polish" },
+  { "word": "follow up", "context": "I will follow up tomorrow.", "targetLanguage": "Polish" },
+  { "word": "thoughtful", "context": "That was a thoughtful response.", "targetLanguage": "Spanish" },
+  { "word": "Apple", "context": "I work with Apple products.", "targetLanguage": "German", "isProductName": true }
+]

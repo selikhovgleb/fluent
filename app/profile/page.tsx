@@ -10,6 +10,9 @@ type Profile = {
   goal: string;
   dailyTarget: string;
   nativeLanguage: string;
+  explanationLanguage: string;
+  translationLanguage: string;
+  storeSentences: boolean;
   reminder: boolean;
 };
 
@@ -20,6 +23,9 @@ const initialProfile: Profile = {
   goal: "Write clearer messages at work",
   dailyTarget: "3 sentences",
   nativeLanguage: "Polish",
+  explanationLanguage: "English",
+  translationLanguage: "Polish",
+  storeSentences: false,
   reminder: true,
 };
 
@@ -39,7 +45,7 @@ export default function ProfilePage() {
   useEffect(() => {
     const stored = localStorage.getItem("fluent-profile");
     if (stored) {
-      const parsed = JSON.parse(stored) as Profile;
+      const parsed = { ...initialProfile, ...JSON.parse(stored) } as Profile;
       setProfile(parsed);
       setDraft(parsed);
     }
@@ -118,8 +124,10 @@ export default function ProfilePage() {
             </article>
 
             <article className="preferences-card">
-              <div><span>Daily reminder</span><button className={profile.reminder ? "toggle on" : "toggle"} onClick={() => { const next = { ...profile, reminder: !profile.reminder }; setProfile(next); setDraft(next); localStorage.setItem("fluent-profile", JSON.stringify(next)); }} aria-label="Toggle daily reminder"><i /></button></div>
+              <div className="preference-row"><span>Daily reminder</span><button className={profile.reminder ? "toggle on" : "toggle"} onClick={() => { const next = { ...profile, reminder: !profile.reminder }; setProfile(next); setDraft(next); localStorage.setItem("fluent-profile", JSON.stringify(next)); }} aria-label="Toggle daily reminder"><i /></button></div>
               <p>{profile.reminder ? "We’ll remind you to practise at 9:00 AM." : "Daily practice reminders are off."}</p>
+              <div className="preference-row privacy-row"><span>Save sentence history</span><button className={profile.storeSentences ? "toggle on" : "toggle"} onClick={() => { const next = { ...profile, storeSentences: !profile.storeSentences }; setProfile(next); setDraft(next); localStorage.setItem("fluent-profile", JSON.stringify(next)); }} aria-label="Toggle sentence history"><i /></button></div>
+              <p>{profile.storeSentences ? "Original and corrected sentences may be saved." : "Only scores and mistake categories are retained."}</p>
             </article>
           </aside>
         </div>
@@ -132,6 +140,8 @@ export default function ProfilePage() {
           <label>Your role<input value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} /></label>
           <label>English level<select value={draft.level} onChange={(e) => setDraft({ ...draft, level: e.target.value })}><option>Beginner (A1–A2)</option><option>Intermediate (B1–B2)</option><option>Advanced (C1–C2)</option></select></label>
           <label>Native language<input value={draft.nativeLanguage} onChange={(e) => setDraft({ ...draft, nativeLanguage: e.target.value })} /></label>
+          <label>Explanation language<select value={draft.explanationLanguage} onChange={(e) => setDraft({ ...draft, explanationLanguage: e.target.value })}><option>English</option><option>Polish</option><option>Spanish</option><option>German</option><option>French</option><option>Ukrainian</option></select></label>
+          <label>Translation language<select value={draft.translationLanguage} onChange={(e) => setDraft({ ...draft, translationLanguage: e.target.value })}><option>Polish</option><option>English</option><option>Spanish</option><option>German</option><option>French</option><option>Ukrainian</option></select></label>
           <label className="full-field">Learning goal<input value={draft.goal} onChange={(e) => setDraft({ ...draft, goal: e.target.value })} /></label>
           <label className="full-field">Daily target<select value={draft.dailyTarget} onChange={(e) => setDraft({ ...draft, dailyTarget: e.target.value })}><option>1 sentence</option><option>3 sentences</option><option>5 sentences</option><option>10 sentences</option></select></label>
           <div className="modal-actions"><button type="button" onClick={() => setEditing(false)}>Cancel</button><button className="primary" type="submit">Save changes <span>→</span></button></div>
