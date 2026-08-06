@@ -129,6 +129,7 @@ export default function ProfilePage() {
               <div className="preference-row privacy-row"><span>Save sentence history</span><button className={profile.storeSentences ? "toggle on" : "toggle"} onClick={() => { const next = { ...profile, storeSentences: !profile.storeSentences }; setProfile(next); setDraft(next); localStorage.setItem("fluent-profile", JSON.stringify(next)); }} aria-label="Toggle sentence history"><i /></button></div>
               <p>{profile.storeSentences ? "Original and corrected sentences may be saved." : "Only scores and mistake categories are retained."}</p>
             </article>
+            <Link className="admin-entry-link" href="/admin"><span>◎</span><div><strong>Admin dashboard</strong><small>Database health and learning activity</small></div><b>→</b></Link>
           </aside>
         </div>
       </div>

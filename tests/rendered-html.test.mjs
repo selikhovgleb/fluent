@@ -38,3 +38,17 @@ test("correction endpoint validates input and keeps the key server-side", async 
   assert.match(client, /store: false/);
   assert.doesNotMatch(await readFile(new URL("../app/page.tsx", import.meta.url), "utf8"), /OPENAI_API_KEY/);
 });
+
+test("admin dashboard is protected and never selects sentence content", async () => {
+  const [page, dashboard] = await Promise.all([
+    readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/admin/dashboard.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /requireChatGPTUser\("\/admin"\)/);
+  assert.match(page, /force-dynamic/);
+  assert.match(page, /Sentence text hidden/);
+  assert.match(dashboard, /COUNT\(\*\)/);
+  assert.doesNotMatch(dashboard, /SELECT[^`]*original_text\s*,/i);
+  assert.doesNotMatch(dashboard, /SELECT[^`]*corrected_text/i);
+});
