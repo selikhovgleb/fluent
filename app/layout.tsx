@@ -1,12 +1,8 @@
 import type { Metadata } from "next";
-import { DM_Sans, Lora } from "next/font/google";
 import "./globals.css";
 
-const sans = DM_Sans({ variable: "--font-sans", subsets: ["latin"] });
-const serif = Lora({ variable: "--font-serif", subsets: ["latin"] });
-
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.SITE_URL || "http://localhost:3000"),
+  metadataBase: new URL(process.env.APP_BASE_URL || "http://localhost:3000"),
   title: "Fluent — Your everyday English coach",
   description: "Improve real work messages and remember useful English vocabulary.",
   icons: { icon: "/favicon.svg" },
@@ -19,5 +15,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body className={`${sans.variable} ${serif.variable}`}>{children}</body></html>;
+  return <html lang="en"><body>{children}</body></html>;
 }

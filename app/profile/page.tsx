@@ -134,8 +134,8 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {editing && <div className="profile-modal-backdrop" onMouseDown={() => setEditing(false)}>
-        <form className="profile-modal" onSubmit={saveProfile} onMouseDown={(event) => event.stopPropagation()}>
+      {editing && <div className="profile-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditing(false); }}>
+        <form className="profile-modal" role="dialog" aria-modal="true" aria-label="Edit your profile" onSubmit={saveProfile}>
           <div className="modal-heading"><div><p className="eyebrow">PERSONALISE FLUENT</p><h2>Edit your profile</h2></div><button type="button" onClick={() => setEditing(false)} aria-label="Close profile editor">×</button></div>
           <label>Your name<input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} required /></label>
           <label>Your role<input value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} /></label>

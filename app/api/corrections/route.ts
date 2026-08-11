@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   const explanationLanguage = safeLanguage(body.explanationLanguage, "English");
   const proficiency = ["A1-A2", "B1-B2", "C1-C2"].includes(String(body.proficiency)) ? String(body.proficiency) : "B1-B2";
   const storeSentence = body.storeSentence === true;
-  const user = getCurrentUser(request);
+  const user = await getCurrentUser();
   const model = getAiModels().correction;
 
   try {

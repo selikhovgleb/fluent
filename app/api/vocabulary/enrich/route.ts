@@ -26,7 +26,7 @@ export async function POST(request: Request) {
       schema: vocabularyJsonSchema,
       maxOutputTokens: 500,
       reasoningEffort: "none",
-      safetyIdentifier: await safetyIdentifier(getCurrentUser(request)),
+      safetyIdentifier: await safetyIdentifier(await getCurrentUser()),
       validate: isVocabularyContract,
     });
     return Response.json({ entry, meta: { model, promptVersion: VOCABULARY_PROMPT_VERSION } });

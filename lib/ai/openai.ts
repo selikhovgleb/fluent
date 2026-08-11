@@ -1,11 +1,3 @@
-import { env } from "cloudflare:workers";
-
-type RuntimeEnv = {
-  OPENAI_API_KEY?: string;
-  OPENAI_CORRECTION_MODEL?: string;
-  OPENAI_VOCABULARY_MODEL?: string;
-};
-
 type StructuredRequest<T> = {
   model: string;
   instructions: string;
@@ -22,21 +14,20 @@ export class AiConfigurationError extends Error {}
 export class AiResponseError extends Error {}
 
 export function getAiModels() {
-  const runtime = env as unknown as RuntimeEnv;
   return {
-    correction: runtime.OPENAI_CORRECTION_MODEL || "gpt-5.6-terra",
-    vocabulary: runtime.OPENAI_VOCABULARY_MODEL || "gpt-5.6-luna",
+    correction: process.env.OPENAI_CORRECTION_MODEL || "gpt-5.6-terra",
+    vocabulary: process.env.OPENAI_VOCABULARY_MODEL || "gpt-5.6-luna",
   };
 }
 
 export async function createStructuredResponse<T>(request: StructuredRequest<T>): Promise<T> {
-  const runtime = env as unknown as RuntimeEnv;
-  if (!runtime.OPENAI_API_KEY) throw new AiConfigurationError("AI service is not configured.");
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new AiConfigurationError("AI service is not configured.");
 
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${runtime.OPENAI_API_KEY}`,
+      "Authorization": `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({

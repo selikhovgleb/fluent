@@ -1,6 +1,4 @@
-@import "tailwindcss";
-
-:root { --ink:#20231f; --muted:#6d7069; --paper:#f7f5ef; --white:#fffefa; --green:#184b3b; --mint:#dcebe2; --yellow:#f3cf59; --coral:#ee795d; --line:#deddd6; }
+:root { --ink:#20231f; --muted:#6d7069; --paper:#f7f5ef; --white:#fffefa; --green:#184b3b; --mint:#dcebe2; --yellow:#f3cf59; --coral:#ee795d; --line:#deddd6; --font-sans:Arial,Helvetica; --font-serif:Georgia,"Times New Roman"; }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--font-sans),sans-serif; }
 button,input,textarea { font:inherit; }
