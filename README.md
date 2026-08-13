@@ -63,15 +63,15 @@ Do not commit these values or add them to GitHub Actions. App Runner reads them 
 Run the one-time CI bootstrap using your administrator AWS identity:
 
 ```powershell
-npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubBranch="main"
+npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubOwnerId="36789374" --context githubRepositoryId="1331360323" --context githubBranch="main"
 ```
 
-Copy the `GitHubDeployRoleArn` output. The trust policy accepts only the `selikhovgleb/fluent` repository's `main` branch and the standard AWS audience.
+Copy the `GitHubDeployRoleArn` output. The trust policy accepts only the immutable GitHub identity for the `selikhovgleb/fluent` repository's `main` branch and the standard AWS audience. The owner and repository IDs protect this trust across renames and prevent recycled names from inheriting access.
 
 If the AWS account already has the GitHub Actions OIDC provider, import it instead of creating a duplicate:
 
 ```powershell
-npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubBranch="main" --context githubOidcProviderArn="arn:aws:iam::AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubOwnerId="36789374" --context githubRepositoryId="1331360323" --context githubBranch="main" --context githubOidcProviderArn="arn:aws:iam::AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
 ```
 
 ### 4. Configure GitHub repository variables

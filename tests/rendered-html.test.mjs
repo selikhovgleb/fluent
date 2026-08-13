@@ -40,7 +40,7 @@ test("production deploy uses branch-scoped GitHub OIDC and a live health check",
   assert.match(workflow, /configure-aws-credentials@v6\.2\.3/);
   assert.match(workflow, /\/api\/health/);
   assert.doesNotMatch(workflow, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/);
-  assert.match(bootstrap, /repo:\$\{githubRepo\}:ref:refs\/heads\/\$\{githubBranch\}/);
+  assert.match(bootstrap, /repo:\$\{githubOwner\}@\$\{githubOwnerId\}\/\$\{githubRepository\}@\$\{githubRepositoryId\}:ref:refs\/heads\/\$\{githubBranch\}/);
   assert.match(bootstrap, /token\.actions\.githubusercontent\.com:aud/);
 });
 
