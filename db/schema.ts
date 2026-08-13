@@ -8,7 +8,7 @@ export const users = pgTable("users", {
   displayName: text("display_name"),
   dialect: text("dialect").notNull().default("en-US"),
   explanationLanguage: text("explanation_language").notNull().default("English"),
-  translationLanguage: text("translation_language").notNull().default("Polish"),
+  translationLanguage: text("translation_language").notNull().default("English"),
   storeSentences: boolean("store_sentences").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),

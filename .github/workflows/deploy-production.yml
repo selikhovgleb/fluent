@@ -1,0 +1,88 @@
+name: Deploy production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: fluent-production
+  cancel-in-progress: false
+
+jobs:
+  validate-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
+      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6.4.0
+        with:
+          node-version: 22.19.0
+          cache: npm
+          package-manager-cache: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate configuration
+        run: |
+          test -n "$AWS_REGION" || { echo "Set the AWS_REGION repository variable."; exit 1; }
+          test -n "$ADMIN_EMAILS" || { echo "Set the ADMIN_EMAILS repository variable."; exit 1; }
+          test -n "${{ vars.AWS_DEPLOY_ROLE_ARN }}" || { echo "Set the AWS_DEPLOY_ROLE_ARN repository variable."; exit 1; }
+
+      - name: Lint and test
+        run: |
+          npm run lint
+          npm test
+
+      - name: Configure short-lived AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Confirm required secrets exist
+        run: |
+          echo "OPENAI_SECRET_ARN=$(aws secretsmanager describe-secret --secret-id fluent-production/openai-api-key --query ARN --output text)" >> "$GITHUB_ENV"
+          echo "GOOGLE_CLIENT_ID_SECRET_ARN=$(aws secretsmanager describe-secret --secret-id fluent-production/google-client-id --query ARN --output text)" >> "$GITHUB_ENV"
+          echo "GOOGLE_CLIENT_SECRET_SECRET_ARN=$(aws secretsmanager describe-secret --secret-id fluent-production/google-client-secret --query ARN --output text)" >> "$GITHUB_ENV"
+
+      - name: Synthesize infrastructure
+        run: |
+          CONTEXT=(--context "adminEmails=$ADMIN_EMAILS" --context "openAiSecretArn=$OPENAI_SECRET_ARN" --context "googleClientIdSecretArn=$GOOGLE_CLIENT_ID_SECRET_ARN" --context "googleClientSecretSecretArn=$GOOGLE_CLIENT_SECRET_SECRET_ARN")
+          if [ -n "$APP_BASE_URL" ]; then CONTEXT+=(--context "appBaseUrl=$APP_BASE_URL"); fi
+          npm run aws:synth -- "${CONTEXT[@]}"
+
+      - name: Deploy application and infrastructure
+        run: |
+          CONTEXT=(--context "adminEmails=$ADMIN_EMAILS" --context "openAiSecretArn=$OPENAI_SECRET_ARN" --context "googleClientIdSecretArn=$GOOGLE_CLIENT_ID_SECRET_ARN" --context "googleClientSecretSecretArn=$GOOGLE_CLIENT_SECRET_SECRET_ARN")
+          if [ -n "$APP_BASE_URL" ]; then CONTEXT+=(--context "appBaseUrl=$APP_BASE_URL"); fi
+          npm run aws:deploy -- "${CONTEXT[@]}"
+
+      - name: Verify production health
+        id: health
+        run: |
+          APP_URL=$(aws cloudformation describe-stacks --stack-name FluentProduction --query "Stacks[0].Outputs[?OutputKey=='ApplicationUrl'].OutputValue" --output text)
+          test -n "$APP_URL"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$APP_URL/api/health" >/dev/null; then
+              echo "url=$APP_URL" >> "$GITHUB_OUTPUT"
+              echo "### Production deployed" >> "$GITHUB_STEP_SUMMARY"
+              echo "[$APP_URL]($APP_URL) passed its health check." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Health check failed for $APP_URL" >&2
+          exit 1

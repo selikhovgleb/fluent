@@ -2,6 +2,8 @@ import { getCurrentUser, safetyIdentifier } from "../../../../lib/auth/current-u
 import { isVocabularyContract, vocabularyJsonSchema, VOCABULARY_PROMPT_VERSION } from "../../../../lib/ai/contracts";
 import { AiConfigurationError, AiResponseError, createStructuredResponse, getAiModels } from "../../../../lib/ai/openai";
 import { vocabularyInstructions } from "../../../../lib/ai/prompts";
+import { vocabularyWords } from "../../../../db/schema";
+import { ensureUser } from "../../../../lib/data/users";
 
 type VocabularyInput = { word?: unknown; context?: unknown; targetLanguage?: unknown };
 
@@ -12,12 +14,14 @@ export async function POST(request: Request) {
 
   const word = typeof body.word === "string" ? body.word.trim() : "";
   const context = typeof body.context === "string" ? body.context.trim().slice(0, 500) : "";
-  const targetLanguage = safeLanguage(body.targetLanguage, "Polish");
+  const targetLanguage = safeLanguage(body.targetLanguage, "English");
   if (!word) return Response.json({ error: "A word or phrase is required.", code: "WORD_REQUIRED" }, { status: 400 });
   if (word.length > 100) return Response.json({ error: "Word or phrase must be 100 characters or fewer.", code: "WORD_TOO_LONG" }, { status: 400 });
 
   const model = getAiModels().vocabulary;
   try {
+    const current = await getCurrentUser();
+    if (!current) return Response.json({ error: "Authentication required." }, { status: 401 });
     const entry = await createStructuredResponse({
       model,
       instructions: vocabularyInstructions,
@@ -26,10 +30,18 @@ export async function POST(request: Request) {
       schema: vocabularyJsonSchema,
       maxOutputTokens: 500,
       reasoningEffort: "none",
-      safetyIdentifier: await safetyIdentifier(await getCurrentUser()),
+      safetyIdentifier: await safetyIdentifier(current),
       validate: isVocabularyContract,
     });
-    return Response.json({ entry, meta: { model, promptVersion: VOCABULARY_PROMPT_VERSION } });
+    const db = await ensureUser(current);
+    const saved = {
+      id: crypto.randomUUID(), userId: current.id, word: entry.word,
+      translation: entry.translation, definition: entry.definition,
+      partOfSpeech: entry.part_of_speech, pronunciation: entry.pronunciation,
+      cefrLevel: entry.level, example: entry.example, targetLanguage,
+    };
+    await db.insert(vocabularyWords).values(saved);
+    return Response.json({ word: { ...saved, intervalDays: 1, easeFactor: 2.5, reviewCount: 0, nextReviewAt: new Date().toISOString() }, meta: { model, promptVersion: VOCABULARY_PROMPT_VERSION } }, { status: 201 });
   } catch (error) {
     if (error instanceof AiConfigurationError) return Response.json({ error: error.message, code: "AI_NOT_CONFIGURED" }, { status: 503 });
     if (error instanceof AiResponseError) return Response.json({ error: "The AI could not enrich this word. Please try again.", code: "AI_RESPONSE_ERROR" }, { status: 502 });

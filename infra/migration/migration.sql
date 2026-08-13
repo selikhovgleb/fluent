@@ -19,7 +19,7 @@ CREATE TABLE "users" (
   "display_name" text,
   "dialect" text DEFAULT 'en-US' NOT NULL,
   "explanation_language" text DEFAULT 'English' NOT NULL,
-  "translation_language" text DEFAULT 'Polish' NOT NULL,
+  "translation_language" text DEFAULT 'English' NOT NULL,
   "store_sentences" boolean DEFAULT false NOT NULL,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL

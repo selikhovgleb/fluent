@@ -23,10 +23,25 @@ test("correction endpoint validates input and keeps the key server-side", async 
   ]);
   assert.match(route, /TEXT_REQUIRED/);
   assert.match(route, /TEXT_TOO_LONG/);
-  assert.match(route, /storeSentence === true/);
+  assert.match(route, /storeSentence = settings\.storeSentences/);
+  assert.doesNotMatch(route, /body\.storeSentence === true/);
   assert.match(client, /OPENAI_API_KEY/);
   assert.match(client, /store: false/);
   assert.doesNotMatch(await readFile(new URL("../app/page.tsx", import.meta.url), "utf8"), /OPENAI_API_KEY/);
+});
+
+test("production deploy uses branch-scoped GitHub OIDC and a live health check", async () => {
+  const [workflow, bootstrap] = await Promise.all([
+    readFile(new URL("../.github/workflows/deploy-production.yml", import.meta.url), "utf8"),
+    readFile(new URL("../infra/ci-bootstrap.mjs", import.meta.url), "utf8"),
+  ]);
+  assert.match(workflow, /branches: \[main\]/);
+  assert.match(workflow, /id-token: write/);
+  assert.match(workflow, /configure-aws-credentials@v6\.2\.3/);
+  assert.match(workflow, /\/api\/health/);
+  assert.doesNotMatch(workflow, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/);
+  assert.match(bootstrap, /repo:\$\{githubRepo\}:ref:refs\/heads\/\$\{githubBranch\}/);
+  assert.match(bootstrap, /token\.actions\.githubusercontent\.com:aud/);
 });
 
 test("admin dashboard is protected and never selects sentence content", async () => {

@@ -51,9 +51,9 @@ class FluentAwsStack extends cdk.Stack {
     });
     database.secret.applyRemovalPolicy(cdk.RemovalPolicy.RETAIN);
 
-    const openAiKey = generatedSecret(this, "OpenAiKey", "fluent-production/openai-api-key", 64);
-    const googleClientId = generatedSecret(this, "GoogleClientId", "fluent-production/google-client-id", 48);
-    const googleClientSecret = generatedSecret(this, "GoogleClientSecret", "fluent-production/google-client-secret", 64);
+    const openAiKey = importedSecret(this, "OpenAiKey", "fluent-production/openai-api-key", props.openAiSecretArn);
+    const googleClientId = importedSecret(this, "GoogleClientId", "fluent-production/google-client-id", props.googleClientIdSecretArn);
+    const googleClientSecret = importedSecret(this, "GoogleClientSecret", "fluent-production/google-client-secret", props.googleClientSecretSecretArn);
     const authSecret = generatedSecret(this, "AuthSecret", "fluent-production/auth-secret", 64);
 
     const migrationHandler = new lambda.Function(this, "MigrationHandler", {
@@ -150,6 +150,12 @@ function generatedSecret(scope, id, secretName, passwordLength) {
   });
 }
 
+function importedSecret(scope, id, secretName, completeArn) {
+  return completeArn
+    ? secretsmanager.Secret.fromSecretCompleteArn(scope, id, completeArn)
+    : secretsmanager.Secret.fromSecretNameV2(scope, id, secretName);
+}
+
 const app = new cdk.App();
 const adminEmails = String(app.node.tryGetContext("adminEmails") ?? "").trim();
 if (!adminEmails) throw new Error("Pass at least one Google account with --context adminEmails=you@example.com");
@@ -158,5 +164,8 @@ new FluentAwsStack(app, "FluentProduction", {
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION ?? "eu-central-1" },
   adminEmails,
   appBaseUrl,
+  openAiSecretArn: String(app.node.tryGetContext("openAiSecretArn") ?? "").trim(),
+  googleClientIdSecretArn: String(app.node.tryGetContext("googleClientIdSecretArn") ?? "").trim(),
+  googleClientSecretSecretArn: String(app.node.tryGetContext("googleClientSecretSecretArn") ?? "").trim(),
   description: "Fluent English coach: App Runner, Aurora PostgreSQL, Data API, Google OAuth, and managed secrets",
 });

@@ -13,7 +13,8 @@
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "aws:synth": "cdk synth --app \"node infra/app.mjs\"",
-    "aws:deploy": "cdk deploy --app \"node infra/app.mjs\" --require-approval broadening"
+    "aws:deploy": "cdk deploy --app \"node infra/app.mjs\" --require-approval never --outputs-file cdk-outputs.json",
+    "aws:ci-bootstrap": "cdk deploy --app \"node infra/ci-bootstrap.mjs\" --require-approval broadening"
   },
   "dependencies": {
     "@aws-sdk/client-rds-data": "^3.1108.0",

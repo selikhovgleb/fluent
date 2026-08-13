@@ -1,53 +1,40 @@
-# Fluent English Coach on AWS
+# Fluent English Coach
 
-Fluent is a containerized Next.js application hosted on AWS App Runner. It uses
-Aurora PostgreSQL Serverless v2 through the RDS Data API, Google OAuth through
-Auth.js, AWS Secrets Manager for credentials, ECR for the application image,
-IAM for least-privilege access, and CloudWatch for service and database logs.
+Fluent is a production Next.js application for AI writing correction and vocabulary review. It runs on AWS App Runner, stores user data in Aurora PostgreSQL Serverless v2 through the RDS Data API, and uses Google OAuth through Auth.js.
 
-## Architecture
+## What is real today
 
-- **AWS App Runner** runs the public HTTPS web application and scales it.
-- **Amazon ECR** stores the Docker image built by CDK.
-- **Aurora PostgreSQL Serverless v2** stores users, correction analytics, and vocabulary data.
-- **RDS Data API** gives the app HTTPS access to PostgreSQL without a public database endpoint or VPC connector.
-- **AWS Secrets Manager** stores the OpenAI key, Google OAuth credentials, Auth.js secret, and database credentials.
-- **AWS IAM** limits the App Runner instance role to the required database and secrets.
-- **AWS Lambda + CloudFormation custom resource** applies versioned PostgreSQL migrations during deployment.
-- **CloudWatch Logs** receives App Runner and PostgreSQL logs automatically.
+- Google-only sign-in protects every app page and API except auth callbacks and health checks.
+- Writing corrections come from the OpenAI API. Failed AI calls display an error; the UI does not fabricate a local result.
+- Corrections, scores, and mistake categories are recorded in PostgreSQL. Original/corrected text is stored only when the user enables sentence history.
+- Profile preferences and statistics come from PostgreSQL.
+- Vocabulary entries and spaced-review events are persisted in PostgreSQL.
+- The focus-word panel uses saved account data. A true always-on-top desktop widget and notifications are explicitly marked as not implemented.
+- The admin dashboard reads live operational and learning data from PostgreSQL.
 
-The stack uses private isolated subnets and no NAT Gateway. App Runner keeps its
-normal internet egress for Google OAuth and the OpenAI API; the database remains private.
+## AWS architecture
 
-## 1. Prerequisites
+- **App Runner** serves the container over public HTTPS.
+- **ECR** stores immutable application images built by CDK.
+- **Aurora PostgreSQL Serverless v2** stores user, correction, and vocabulary data in private isolated subnets.
+- **RDS Data API** connects App Runner to PostgreSQL without exposing the database publicly.
+- **Secrets Manager** stores OpenAI, Google OAuth, Auth.js, and database credentials.
+- **Lambda + a CloudFormation custom resource** apply versioned SQL migrations.
+- **GitHub Actions + AWS OIDC** deploy every push/merge to `main` without long-lived AWS access keys in GitHub.
 
-Install:
+## One-time production setup
 
-- Node.js 22.13 or newer
-- Docker Desktop, running with Linux containers
-- AWS CLI v2
-- An AWS account with permission to create IAM, App Runner, ECR, RDS, EC2 networking, Lambda, Secrets Manager, and CloudFormation resources
-- A Google Cloud account for the OAuth client
+### 1. Prerequisites
 
-Choose a region that supports Aurora PostgreSQL Serverless v2 and the RDS Data
-API. The default is `eu-central-1`.
-
-Configure AWS credentials:
+Install Node.js 22.13+, Docker Desktop (Linux containers), AWS CLI v2, and Git. Configure an AWS identity with permission to bootstrap CDK and create the resources above.
 
 ```powershell
 aws configure
 aws sts get-caller-identity
-```
-
-Install the project dependencies:
-
-```powershell
 npm ci
 ```
 
-## 2. Bootstrap and deploy AWS infrastructure
-
-In PowerShell, select the account and region:
+The examples use `eu-central-1`. Select another region only after confirming that it supports Aurora PostgreSQL Serverless v2, RDS Data API, and App Runner.
 
 ```powershell
 $AwsAccount = aws sts get-caller-identity --query Account --output text
@@ -57,137 +44,110 @@ $env:CDK_DEFAULT_REGION = $AwsRegion
 npx cdk bootstrap "aws://$AwsAccount/$AwsRegion"
 ```
 
-Deploy the stack. Replace the email with the Google account that may access
-`/admin`. Multiple administrators can be comma-separated.
+### 2. Create real application secrets
 
-```powershell
-npm run aws:deploy -- --context adminEmails="you@gmail.com"
-```
+Before the first app deployment, create these three **Other type of secret** values in AWS Secrets Manager in the selected region:
 
-CDK builds the Docker image, pushes it to ECR, creates Aurora PostgreSQL, applies
-the schema migration, and creates the App Runner service. The deployment outputs
-include `ApplicationUrl` and `AppRunnerServiceArn`.
-
-Retrieve them again later with:
-
-```powershell
-aws cloudformation describe-stacks --stack-name FluentProduction --query "Stacks[0].Outputs" --output table
-```
-
-## 3. Add the application secrets
-
-Open **AWS Console → Secrets Manager** in the deployed region and replace the
-current values of these secrets:
-
-| Secret name | Value |
+| Secret name | Secret value |
 | --- | --- |
-| `fluent-production/openai-api-key` | Your OpenAI API key |
-| `fluent-production/google-client-id` | Google OAuth client ID from step 4 |
-| `fluent-production/google-client-secret` | Google OAuth client secret from step 4 |
+| `fluent-production/openai-api-key` | A real OpenAI API key |
+| `fluent-production/google-client-id` | Google Web OAuth client ID |
+| `fluent-production/google-client-secret` | Google Web OAuth client secret |
 
-`fluent-production/auth-secret` and `fluent-production/database-admin` are
-generated securely by AWS; do not replace them.
+Create the Google client in Google Cloud Console with application type **Web application**. You can initially add the local callback `http://localhost:3000/api/auth/callback/google`; add the remote callback after AWS produces the application URL.
 
-Do not put any of these values in Git, Docker build arguments, CDK context, or a
-committed environment file.
+Do not commit these values or add them to GitHub Actions. App Runner reads them directly from Secrets Manager. CDK generates the Auth.js secret and database credential securely.
 
-## 4. Configure Google-only sign-in
+### 3. Create the GitHub OIDC deploy role
 
-1. Open Google Cloud Console and create or select a project.
-2. Configure **Google Auth Platform → Branding/Audience**. For development, add your Google account as a test user.
-3. Create an **OAuth client ID** with application type **Web application**.
-4. Copy the `ApplicationUrl` from the CloudFormation outputs.
-5. Add this authorized redirect URI:
-
-   ```text
-   https://YOUR-APP-RUNNER-URL/api/auth/callback/google
-   ```
-
-6. Store the client ID and client secret in the two Secrets Manager secrets from step 3.
-
-For production, associate a domain you control with App Runner, add
-`https://your-domain.example/api/auth/callback/google` to Google, and redeploy
-with the canonical URL used for metadata:
+Run the one-time CI bootstrap using your administrator AWS identity:
 
 ```powershell
-npm run aws:deploy -- --context adminEmails="you@gmail.com" --context appBaseUrl="https://your-domain.example"
+npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubBranch="main"
 ```
 
-## 5. Restart App Runner after changing secrets
+Copy the `GitHubDeployRoleArn` output. The trust policy accepts only the `selikhovgleb/fluent` repository's `main` branch and the standard AWS audience.
 
-App Runner reads referenced Secrets Manager values during deployment. Start a
-new deployment after changing any secret:
+If the AWS account already has the GitHub Actions OIDC provider, import it instead of creating a duplicate:
 
 ```powershell
-$ServiceArn = aws cloudformation describe-stacks `
-  --stack-name FluentProduction `
-  --query "Stacks[0].Outputs[?OutputKey=='AppRunnerServiceArn'].OutputValue" `
-  --output text
-aws apprunner start-deployment --service-arn $ServiceArn
+npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubBranch="main" --context githubOidcProviderArn="arn:aws:iam::AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
 ```
 
-Wait until App Runner reports **Running**, then open the application URL and sign
-in with Google. All application pages and AI endpoints require a Google session;
-the admin route also checks the `ADMIN_EMAILS` allowlist. Only the Auth.js callback
-and the App Runner health endpoint are public.
+### 4. Configure GitHub repository variables
 
-## 6. Local development against AWS PostgreSQL
+Open **GitHub → selikhovgleb/fluent → Settings → Secrets and variables → Actions → Variables** and add:
 
-Copy `.env.example` to `.env.local` and fill in the application values. Use the
-Aurora cluster ARN and database secret ARN from CloudFormation/RDS. The AWS SDK
-uses your local AWS CLI credentials for Data API calls.
+| Variable | Value |
+| --- | --- |
+| `AWS_DEPLOY_ROLE_ARN` | `GitHubDeployRoleArn` from step 3 |
+| `AWS_REGION` | `eu-central-1` (or your selected region) |
+| `ADMIN_EMAILS` | Google email(s) allowed into `/admin`, comma-separated |
+| `APP_BASE_URL` | Optional custom-domain HTTPS URL; leave unset for the App Runner URL |
 
-Generate a local Auth.js secret:
+These are identifiers/configuration, not credentials. No AWS access-key GitHub secrets are needed.
+
+### 5. Trigger the first deployment
+
+The workflow at `.github/workflows/deploy-production.yml` runs for every push to `main`, including merged pull requests. It performs:
+
+1. `npm ci`
+2. lint and production build/tests
+3. AWS authentication with a short-lived GitHub OIDC token
+4. required-secret existence checks
+5. CDK synthesis and deployment
+6. a live `GET /api/health` check against the App Runner URL
+
+Trigger it from the **Actions** tab with **Run workflow**, or merge/push to `main`. The successful run summary contains the public application URL.
+
+### 6. Finish Google OAuth
+
+Read the deployed URL if needed:
 
 ```powershell
-node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
+aws cloudformation describe-stacks --stack-name FluentProduction --query "Stacks[0].Outputs[?OutputKey=='ApplicationUrl'].OutputValue" --output text
 ```
 
-For local Google OAuth, add this second redirect URI to the same Google client:
+Add the following authorized redirect URI to the Google Web OAuth client:
 
 ```text
-http://localhost:3000/api/auth/callback/google
+https://YOUR-APP-RUNNER-URL/api/auth/callback/google
 ```
 
-Then run:
+If you changed either Google credential value in Secrets Manager, start another workflow deployment so App Runner receives the current secret values.
+
+## Local development
+
+Copy `.env.example` to `.env.local` and provide real local values. For Google OAuth, authorize `http://localhost:3000/api/auth/callback/google`. The AWS identity running Next.js needs RDS Data API and database-secret access.
 
 ```powershell
 npm run dev
 ```
 
-Your AWS identity needs `rds-data:ExecuteStatement` and
-`secretsmanager:GetSecretValue` for the deployed database resources.
-
 ## Database migrations
 
-The source schema is in `db/schema.ts`; generated migrations are under
-`drizzle/`. The initial AWS migration is packaged in `infra/migration/` and is
-applied automatically and exactly once by the deployment custom resource.
-
-After changing the schema:
+The source schema is `db/schema.ts`. Generate and inspect a migration after schema changes:
 
 ```powershell
 npm run db:generate
 ```
 
-Copy the new generated SQL file to `infra/migration/`, inspect it, and deploy
-again. CDK calculates a migration fingerprint automatically, and the migration
-runner records each filename after applying it. Never edit an already-applied migration.
+Place the approved SQL migration in `infra/migration/`. CDK fingerprints that directory, and the migration Lambda records each applied filename. Never edit an already-applied migration.
 
-## Validation
+## Local validation
 
 ```powershell
 npm run lint
 npm test
 npm run aws:synth -- --context adminEmails="you@gmail.com"
+npx cdk synth --app "node infra/ci-bootstrap.mjs"
 ```
 
-## Security and cost notes
+## Cost and safety
 
-- Aurora has deletion protection enabled and takes a final snapshot on stack removal.
-- Aurora can auto-pause at 0 ACUs after ten idle minutes; first access after a pause can be slower.
-- App Runner keeps one provisioned instance ready (`minSize: 1`) and therefore has a continuous baseline cost.
-- App Runner, Aurora, Secrets Manager, ECR storage, CloudWatch logs, and data transfer are billable AWS services.
+- Aurora has deletion protection and snapshot removal policy; App Runner keeps one warm instance. Both create ongoing AWS charges.
+- App Runner, ECR, Secrets Manager, CloudWatch, data transfer, and OpenAI usage are billable.
 - Set an AWS Budget and billing alert before production use.
+- The database has no public endpoint, and the GitHub deployment role can only assume this account's CDK bootstrap roles plus perform narrow preflight reads.
 
-Useful official references: [App Runner image services](https://docs.aws.amazon.com/apprunner/latest/dg/service-source-image.html), [App Runner IAM roles](https://docs.aws.amazon.com/apprunner/latest/dg/security_iam_service-with-iam.html), [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.create.html), and [RDS Data API support](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/Concepts.Aurora_Fea_Regions_DB-eng.Feature.Data_API.html).
+Official references: [GitHub OIDC for AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws), [AWS credentials action](https://github.com/aws-actions/configure-aws-credentials), [App Runner image services](https://docs.aws.amazon.com/apprunner/latest/dg/service-source-image.html), [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.create.html), and [RDS Data API](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.html).

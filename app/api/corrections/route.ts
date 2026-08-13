@@ -3,6 +3,9 @@ import { AiConfigurationError, AiResponseError, createStructuredResponse, getAiM
 import { correctionInstructions } from "../../../lib/ai/prompts";
 import { recordCorrection } from "../../../lib/analytics/corrections";
 import { getCurrentUser, safetyIdentifier } from "../../../lib/auth/current-user";
+import { ensureUser } from "../../../lib/data/users";
+import { users } from "../../../db/schema";
+import { eq } from "drizzle-orm";
 
 type CorrectionInput = {
   text?: unknown;
@@ -10,7 +13,6 @@ type CorrectionInput = {
   tone?: unknown;
   explanationLanguage?: unknown;
   proficiency?: unknown;
-  storeSentence?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -22,15 +24,24 @@ export async function POST(request: Request) {
   if (!text) return Response.json({ error: "Text is required.", code: "TEXT_REQUIRED" }, { status: 400 });
   if (text.length > 2000) return Response.json({ error: "Text must be 2,000 characters or fewer.", code: "TEXT_TOO_LONG" }, { status: 400 });
 
-  const dialect = body.dialect === "en-GB" ? "en-GB" : "en-US";
+  let dialect = body.dialect === "en-GB" ? "en-GB" : "en-US";
   const tone = body.tone === "casual-natural" ? "casual-natural" : "professional-natural";
-  const explanationLanguage = safeLanguage(body.explanationLanguage, "English");
+  let explanationLanguage = safeLanguage(body.explanationLanguage, "English");
   const proficiency = ["A1-A2", "B1-B2", "C1-C2"].includes(String(body.proficiency)) ? String(body.proficiency) : "B1-B2";
-  const storeSentence = body.storeSentence === true;
+  let storeSentence = false;
   const user = await getCurrentUser();
   const model = getAiModels().correction;
 
   try {
+    if (user) {
+      const db = await ensureUser(user);
+      const [settings] = await db.select({ dialect: users.dialect, explanationLanguage: users.explanationLanguage, storeSentences: users.storeSentences }).from(users).where(eq(users.id, user.id)).limit(1);
+      if (settings) {
+        dialect = settings.dialect;
+        explanationLanguage = settings.explanationLanguage;
+        storeSentence = settings.storeSentences;
+      }
+    }
     const result = await createStructuredResponse({
       model,
       instructions: correctionInstructions,
@@ -44,7 +55,7 @@ export async function POST(request: Request) {
     });
 
     const corrections = addVerifiedPositions(text, result.corrections);
-    await recordCorrection({ user, result, originalText: text, storeSentence, model, promptVersion: CORRECTION_PROMPT_VERSION }).catch(() => undefined);
+    await recordCorrection({ user, result, originalText: text, storeSentence, model, promptVersion: CORRECTION_PROMPT_VERSION });
 
     return Response.json({
       corrected: result.corrected_text,
