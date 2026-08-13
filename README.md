@@ -34,11 +34,11 @@ aws sts get-caller-identity
 npm ci
 ```
 
-This project is configured for AWS Europe (Stockholm), `eu-north-1`. Keep CDK, Secrets Manager, and GitHub Actions in this same region.
+This project is configured for AWS Europe (Frankfurt), `eu-central-1`, because App Runner is not available in Stockholm. Keep the application stack, Secrets Manager, and GitHub Actions in Frankfurt.
 
 ```powershell
 $AwsAccount = aws sts get-caller-identity --query Account --output text
-$AwsRegion = "eu-north-1"
+$AwsRegion = "eu-central-1"
 $env:CDK_DEFAULT_ACCOUNT = $AwsAccount
 $env:CDK_DEFAULT_REGION = $AwsRegion
 npx cdk bootstrap "aws://$AwsAccount/$AwsRegion"
@@ -63,7 +63,7 @@ Do not commit these values or add them to GitHub Actions. App Runner reads them 
 Run the one-time CI bootstrap using your administrator AWS identity:
 
 ```powershell
-npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubOwnerId="36789374" --context githubRepositoryId="1331360323" --context githubBranch="main"
+npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubOwnerId="36789374" --context githubRepositoryId="1331360323" --context githubBranch="main" --context deploymentRegion="eu-central-1"
 ```
 
 Copy the `GitHubDeployRoleArn` output. The trust policy accepts only the immutable GitHub identity for the `selikhovgleb/fluent` repository's `main` branch and the standard AWS audience. The owner and repository IDs protect this trust across renames and prevent recycled names from inheriting access.
@@ -71,7 +71,7 @@ Copy the `GitHubDeployRoleArn` output. The trust policy accepts only the immutab
 If the AWS account already has the GitHub Actions OIDC provider, import it instead of creating a duplicate:
 
 ```powershell
-npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubOwnerId="36789374" --context githubRepositoryId="1331360323" --context githubBranch="main" --context githubOidcProviderArn="arn:aws:iam::AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubOwnerId="36789374" --context githubRepositoryId="1331360323" --context githubBranch="main" --context deploymentRegion="eu-central-1" --context githubOidcProviderArn="arn:aws:iam::AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
 ```
 
 ### 4. Configure GitHub repository variables
@@ -81,7 +81,7 @@ Open **GitHub → selikhovgleb/fluent → Settings → Secrets and variables →
 | Variable | Value |
 | --- | --- |
 | `AWS_DEPLOY_ROLE_ARN` | `GitHubDeployRoleArn` from step 3 |
-| `AWS_REGION` | `eu-north-1` |
+| `AWS_REGION` | `eu-central-1` |
 | `ADMIN_EMAILS` | Google email(s) allowed into `/admin`, comma-separated |
 | `APP_BASE_URL` | Optional custom-domain HTTPS URL; leave unset for the App Runner URL |
 

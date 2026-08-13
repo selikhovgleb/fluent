@@ -5,7 +5,7 @@ import * as iam from "aws-cdk-lib/aws-iam";
 class FluentCiBootstrapStack extends cdk.Stack {
   constructor(scope, id, props) {
     super(scope, id, props);
-    const { githubRepo, githubOwnerId, githubRepositoryId, githubBranch, existingProviderArn } = props;
+    const { githubRepo, githubOwnerId, githubRepositoryId, githubBranch, deploymentRegion, existingProviderArn } = props;
     const [githubOwner, githubRepository] = githubRepo.split("/");
     if (!githubOwner || !githubRepository) throw new Error("githubRepo must use the owner/repository format.");
     const trustedSubject = `repo:${githubOwner}@${githubOwnerId}/${githubRepository}@${githubRepositoryId}:ref:refs/heads/${githubBranch}`;
@@ -38,14 +38,14 @@ class FluentCiBootstrapStack extends cdk.Stack {
     }));
     role.addToPolicy(new iam.PolicyStatement({
       actions: ["ssm:GetParameter"],
-      resources: [`arn:${this.partition}:ssm:${this.region}:${this.account}:parameter/cdk-bootstrap/hnb659fds/version`],
+      resources: [`arn:${this.partition}:ssm:${deploymentRegion}:${this.account}:parameter/cdk-bootstrap/hnb659fds/version`],
     }));
     role.addToPolicy(new iam.PolicyStatement({
       actions: ["secretsmanager:DescribeSecret"],
       resources: [
-        `arn:${this.partition}:secretsmanager:${this.region}:${this.account}:secret:fluent-production/openai-api-key-*`,
-        `arn:${this.partition}:secretsmanager:${this.region}:${this.account}:secret:fluent-production/google-client-id-*`,
-        `arn:${this.partition}:secretsmanager:${this.region}:${this.account}:secret:fluent-production/google-client-secret-*`,
+        `arn:${this.partition}:secretsmanager:${deploymentRegion}:${this.account}:secret:fluent-production/openai-api-key-*`,
+        `arn:${this.partition}:secretsmanager:${deploymentRegion}:${this.account}:secret:fluent-production/google-client-id-*`,
+        `arn:${this.partition}:secretsmanager:${deploymentRegion}:${this.account}:secret:fluent-production/google-client-secret-*`,
       ],
     }));
 
@@ -59,9 +59,10 @@ const githubRepo = String(app.node.tryGetContext("githubRepo") ?? "selikhovgleb/
 const githubOwnerId = String(app.node.tryGetContext("githubOwnerId") ?? "36789374").trim();
 const githubRepositoryId = String(app.node.tryGetContext("githubRepositoryId") ?? "1331360323").trim();
 const githubBranch = String(app.node.tryGetContext("githubBranch") ?? "main").trim();
+const deploymentRegion = String(app.node.tryGetContext("deploymentRegion") ?? "eu-central-1").trim();
 const existingProviderArn = String(app.node.tryGetContext("githubOidcProviderArn") ?? "").trim();
 new FluentCiBootstrapStack(app, "FluentCiBootstrap", {
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION ?? "eu-central-1" },
-  githubRepo, githubOwnerId, githubRepositoryId, githubBranch, existingProviderArn,
+  githubRepo, githubOwnerId, githubRepositoryId, githubBranch, deploymentRegion, existingProviderArn,
   description: "GitHub OIDC trust and least-privilege CDK deployment role for Fluent",
 });
