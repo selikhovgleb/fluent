@@ -149,6 +149,7 @@ npm run db:generate
 ```
 
 Place the approved SQL migration in `infra/migration/`. CDK fingerprints that directory, and the migration Lambda records each applied filename. Never edit an already-applied migration.
+CloudFormation explicitly waits for the Aurora writer instance before invoking the migration custom resource; do not remove that dependency.
 
 ## Local validation
 

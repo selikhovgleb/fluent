@@ -37,9 +37,10 @@ class FluentAwsStack extends cdk.Stack {
       subnetConfiguration: [{ name: "application", subnetType: ec2.SubnetType.PUBLIC }],
     });
 
+    const databaseWriter = rds.ClusterInstance.serverlessV2("writer");
     const database = new rds.DatabaseCluster(this, "Postgres", {
       engine: rds.DatabaseClusterEngine.auroraPostgres({ version: rds.AuroraPostgresEngineVersion.VER_16_11 }),
-      writer: rds.ClusterInstance.serverlessV2("writer"),
+      writer: databaseWriter,
       serverlessV2MinCapacity: 0,
       serverlessV2MaxCapacity: 2,
       serverlessV2AutoPauseDuration: cdk.Duration.minutes(10),
@@ -84,6 +85,10 @@ class FluentAwsStack extends cdk.Stack {
       serviceToken: migrationProvider.serviceToken,
       properties: { MigrationFingerprint: migrationFingerprint },
     });
+    // The Data API endpoint exists at cluster creation time, but SQL cannot run until the writer
+    // instance is available. Without this dependency CloudFormation can invoke the migration and
+    // create the writer in parallel, causing "Cannot find DBInstance in DBCluster".
+    migration.node.addDependency(database.node.findChild("writer"));
 
     const image = new ecrAssets.DockerImageAsset(this, "ApplicationImage", { directory: projectRoot });
     const instanceRole = new iam.Role(this, "ApplicationInstanceRole", {

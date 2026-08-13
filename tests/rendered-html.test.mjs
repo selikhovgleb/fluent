@@ -84,6 +84,7 @@ test("AWS runtime uses PostgreSQL Data API, managed secrets, and Google OAuth", 
   assert.match(infrastructure, /authSecret = importedSecret/);
   assert.match(infrastructure, /generatedSecret\(this, "OriginVerificationSecret", 48\)/);
   assert.doesNotMatch(infrastructure, /generatedSecret\(this, "AuthSecret"/);
+  assert.match(infrastructure, /migration\.node\.addDependency\(database\.node\.findChild\("writer"\)\)/);
   assert.doesNotMatch(infrastructure, /Port\.tcp\(22\)/);
   assert.doesNotMatch(infrastructure, /Port\.tcp\(443\)/);
   assert.doesNotMatch(database, /cloudflare:workers|drizzle-orm\/d1/);
