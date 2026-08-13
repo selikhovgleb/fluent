@@ -15,6 +15,7 @@ const eslintConfig = defineConfig([
     "build/**",
     "work/**",
     "cdk.out/**",
+    "cdk.out*/**",
     "next-env.d.ts",
   ]),
   eslint.configs.recommended,

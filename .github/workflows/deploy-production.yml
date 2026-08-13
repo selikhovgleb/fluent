@@ -46,11 +46,15 @@ jobs:
           npm run lint
           npm test
 
+      - name: Show non-sensitive GitHub OIDC claims
+        run: node scripts/print-oidc-claims.mjs
+
       - name: Configure short-lived AWS credentials
         uses: aws-actions/configure-aws-credentials@v6.2.3
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+          audience: sts.amazonaws.com
 
       - name: Confirm required secrets exist
         run: |
