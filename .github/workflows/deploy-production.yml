@@ -20,7 +20,6 @@ jobs:
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       ADMIN_EMAILS: ${{ vars.ADMIN_EMAILS }}
-      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
     steps:
       - name: Check out source
         uses: actions/checkout@v7.0.1
@@ -62,23 +61,23 @@ jobs:
       - name: Synthesize infrastructure
         run: |
           CONTEXT=(--context "adminEmails=$ADMIN_EMAILS" --context "openAiSecretArn=$OPENAI_SECRET_ARN" --context "googleClientIdSecretArn=$GOOGLE_CLIENT_ID_SECRET_ARN" --context "googleClientSecretSecretArn=$GOOGLE_CLIENT_SECRET_SECRET_ARN")
-          if [ -n "$APP_BASE_URL" ]; then CONTEXT+=(--context "appBaseUrl=$APP_BASE_URL"); fi
           npm run aws:synth -- "${CONTEXT[@]}"
 
       - name: Deploy application and infrastructure
         run: |
           CONTEXT=(--context "adminEmails=$ADMIN_EMAILS" --context "openAiSecretArn=$OPENAI_SECRET_ARN" --context "googleClientIdSecretArn=$GOOGLE_CLIENT_ID_SECRET_ARN" --context "googleClientSecretSecretArn=$GOOGLE_CLIENT_SECRET_SECRET_ARN")
-          if [ -n "$APP_BASE_URL" ]; then CONTEXT+=(--context "appBaseUrl=$APP_BASE_URL"); fi
           npm run aws:deploy -- "${CONTEXT[@]}"
 
       - name: Roll out image on EC2
         run: |
           INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name FluentProduction --query "Stacks[0].Outputs[?OutputKey=='ApplicationInstanceId'].OutputValue" --output text)
           IMAGE_URI=$(aws cloudformation describe-stacks --stack-name FluentProduction --query "Stacks[0].Outputs[?OutputKey=='ApplicationImageUri'].OutputValue" --output text)
+          APP_URL=$(aws cloudformation describe-stacks --stack-name FluentProduction --query "Stacks[0].Outputs[?OutputKey=='ApplicationUrl'].OutputValue" --output text)
           test -n "$INSTANCE_ID"
           test -n "$IMAGE_URI"
+          test -n "$APP_URL"
 
-          DEPLOY_COMMAND="for attempt in \$(seq 1 60); do if [ -x /opt/fluent/deploy.sh ]; then sudo /opt/fluent/deploy.sh '$IMAGE_URI'; exit \$?; fi; sleep 5; done; exit 1"
+          DEPLOY_COMMAND="for attempt in \$(seq 1 60); do if [ -x /opt/fluent/deploy.sh ]; then sudo /opt/fluent/deploy.sh '$IMAGE_URI' '$APP_URL'; exit \$?; fi; sleep 5; done; exit 1"
           PARAMETERS=$(jq -cn --arg command "$DEPLOY_COMMAND" '{commands:[$command]}')
           COMMAND_ID=""
           for attempt in $(seq 1 30); do

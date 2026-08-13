@@ -4,6 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as cdk from "aws-cdk-lib";
+import * as cloudfront from "aws-cdk-lib/aws-cloudfront";
+import * as origins from "aws-cdk-lib/aws-cloudfront-origins";
 import * as customResources from "aws-cdk-lib/custom-resources";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
@@ -23,15 +25,6 @@ class FluentAwsStack extends cdk.Stack {
     super(scope, id, props);
 
     const adminEmails = props.adminEmails;
-    const appBaseUrl = props.appBaseUrl;
-    let appHostname = "";
-    if (appBaseUrl) {
-      const parsedAppUrl = new URL(appBaseUrl);
-      if (parsedAppUrl.protocol !== "https:" || parsedAppUrl.origin !== appBaseUrl.replace(/\/$/, "")) {
-        throw new Error("appBaseUrl must be an HTTPS origin without a path, for example https://english.example.com");
-      }
-      appHostname = parsedAppUrl.hostname;
-    }
 
     const databaseVpc = new ec2.Vpc(this, "DatabaseVpc", {
       maxAzs: 2,
@@ -67,6 +60,7 @@ class FluentAwsStack extends cdk.Stack {
     const googleClientId = importedSecret(this, "GoogleClientId", "fluent-production/google-client-id", props.googleClientIdSecretArn);
     const googleClientSecret = importedSecret(this, "GoogleClientSecret", "fluent-production/google-client-secret", props.googleClientSecretSecretArn);
     const authSecret = generatedSecret(this, "AuthSecret", "fluent-production/auth-secret", 64);
+    const originVerificationSecret = generatedSecret(this, "OriginVerificationSecret", "fluent-production/origin-verification", 48);
 
     const migrationHandler = new lambda.Function(this, "MigrationHandler", {
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -95,29 +89,27 @@ class FluentAwsStack extends cdk.Stack {
     image.repository.grantPull(instanceRole);
     database.grantDataApiAccess(instanceRole);
     database.secret.grantRead(instanceRole);
-    for (const secret of [openAiKey, googleClientId, googleClientSecret, authSecret]) secret.grantRead(instanceRole);
+    for (const secret of [openAiKey, googleClientId, googleClientSecret, authSecret, originVerificationSecret]) secret.grantRead(instanceRole);
 
     const applicationSecurityGroup = new ec2.SecurityGroup(this, "ApplicationSecurityGroup", {
       vpc: applicationVpc,
-      description: "Public web access to Fluent; administration uses Systems Manager",
+      description: "CloudFront origin access to Fluent; administration uses Systems Manager",
       allowAllOutbound: true,
     });
-    applicationSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), "HTTP and ACME validation");
-    applicationSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(443), "HTTPS");
+    applicationSecurityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80), "CloudFront HTTP origin");
 
     const elasticIp = new ec2.CfnEIP(this, "ApplicationElasticIp", { domain: "vpc" });
-    const publicUrl = appBaseUrl || `http://${elasticIp.attrPublicIp}`;
-    const caddyAddress = appHostname || ":80";
     const userData = ec2.UserData.forLinux();
     userData.addCommands(
       "set -euo pipefail",
       "dnf install -y docker",
       "systemctl enable --now docker",
-      "install -d -m 700 /opt/fluent /opt/fluent/caddy-data /opt/fluent/caddy-config",
-      `cat > /opt/fluent/Caddyfile <<'CADDYFILE'\n${caddyAddress} {\n  encode zstd gzip\n  reverse_proxy fluent-app:3000\n}\nCADDYFILE`,
+      "install -d -m 700 /opt/fluent",
+      `ORIGIN_VERIFY=$(aws secretsmanager get-secret-value --region '${this.region}' --secret-id '${originVerificationSecret.secretName}' --query SecretString --output text)`,
+      `cat > /opt/fluent/Caddyfile <<CADDYFILE\n:80 {\n  @fromCloudFront header X-Fluent-Origin-Verify $ORIGIN_VERIFY\n  handle @fromCloudFront {\n    encode zstd gzip\n    reverse_proxy fluent-app:3000\n  }\n  respond 403\n}\nCADDYFILE`,
       // Shell quoting is intentionally explicit because this template is written verbatim to the host.
       // eslint-disable-next-line no-useless-escape
-      `cat > /opt/fluent/deploy.sh <<'DEPLOY_SCRIPT'\n#!/usr/bin/env bash\nset -euo pipefail\nIMAGE_URI=\"$1\"\nREGION=\"${this.region}\"\nfetch_secret() { aws secretsmanager get-secret-value --region \"$REGION\" --secret-id \"$1\" --query SecretString --output text; }\numask 077\n{\n  printf '%s\\n' 'NODE_ENV=production' 'AWS_REGION=${this.region}' 'DATABASE_NAME=fluent'\n  printf '%s\\n' 'DATABASE_RESOURCE_ARN=${database.clusterArn}' 'DATABASE_SECRET_ARN=${database.secret.secretArn}'\n  printf '%s\\n' 'OPENAI_CORRECTION_MODEL=gpt-5.6-terra' 'OPENAI_VOCABULARY_MODEL=gpt-5.6-luna'\n  printf '%s\\n' 'ADMIN_EMAILS=${shellSingleQuote(adminEmails)}' 'APP_BASE_URL=${publicUrl}'\n  printf 'OPENAI_API_KEY=%s\\n' \"$(fetch_secret '${openAiKey.secretName}')\"\n  printf 'GOOGLE_CLIENT_ID=%s\\n' \"$(fetch_secret '${googleClientId.secretName}')\"\n  printf 'GOOGLE_CLIENT_SECRET=%s\\n' \"$(fetch_secret '${googleClientSecret.secretName}')\"\n  printf 'AUTH_SECRET=%s\\n' \"$(fetch_secret '${authSecret.secretName}')\"\n} > /opt/fluent/app.env\naws ecr get-login-password --region \"$REGION\" | docker login --username AWS --password-stdin \"$(printf '%s' \"$IMAGE_URI\" | cut -d/ -f1)\"\ndocker pull \"$IMAGE_URI\"\ndocker network inspect fluent >/dev/null 2>&1 || docker network create fluent\ndocker rm -f fluent-app >/dev/null 2>&1 || true\ndocker run -d --name fluent-app --restart unless-stopped --network fluent --env-file /opt/fluent/app.env \"$IMAGE_URI\"\ndocker image prune -af --filter 'until=168h'\ndocker rm -f fluent-proxy >/dev/null 2>&1 || true\ndocker run -d --name fluent-proxy --restart unless-stopped --network fluent -p 80:80 -p 443:443 -p 443:443/udp -v /opt/fluent/Caddyfile:/etc/caddy/Caddyfile:ro -v /opt/fluent/caddy-data:/data -v /opt/fluent/caddy-config:/config caddy:2.10-alpine\nDEPLOY_SCRIPT`,
+      `cat > /opt/fluent/deploy.sh <<'DEPLOY_SCRIPT'\n#!/usr/bin/env bash\nset -euo pipefail\nIMAGE_URI=\"$1\"\nAPP_URL=\"$2\"\nREGION=\"${this.region}\"\ncase \"$APP_URL\" in https://*.cloudfront.net) ;; *) echo 'Expected the generated CloudFront HTTPS URL.' >&2; exit 2 ;; esac\nfetch_secret() { aws secretsmanager get-secret-value --region \"$REGION\" --secret-id \"$1\" --query SecretString --output text; }\numask 077\n{\n  printf '%s\\n' 'NODE_ENV=production' 'AWS_REGION=${this.region}' 'DATABASE_NAME=fluent'\n  printf '%s\\n' 'DATABASE_RESOURCE_ARN=${database.clusterArn}' 'DATABASE_SECRET_ARN=${database.secret.secretArn}'\n  printf '%s\\n' 'OPENAI_CORRECTION_MODEL=gpt-5.6-terra' 'OPENAI_VOCABULARY_MODEL=gpt-5.6-luna'\n  printf '%s\\n' 'ADMIN_EMAILS=${shellSingleQuote(adminEmails)}' \"APP_BASE_URL=$APP_URL\"\n  printf 'OPENAI_API_KEY=%s\\n' \"$(fetch_secret '${openAiKey.secretName}')\"\n  printf 'GOOGLE_CLIENT_ID=%s\\n' \"$(fetch_secret '${googleClientId.secretName}')\"\n  printf 'GOOGLE_CLIENT_SECRET=%s\\n' \"$(fetch_secret '${googleClientSecret.secretName}')\"\n  printf 'AUTH_SECRET=%s\\n' \"$(fetch_secret '${authSecret.secretName}')\"\n} > /opt/fluent/app.env\naws ecr get-login-password --region \"$REGION\" | docker login --username AWS --password-stdin \"$(printf '%s' \"$IMAGE_URI\" | cut -d/ -f1)\"\ndocker pull \"$IMAGE_URI\"\ndocker network inspect fluent >/dev/null 2>&1 || docker network create fluent\ndocker rm -f fluent-app >/dev/null 2>&1 || true\ndocker run -d --name fluent-app --restart unless-stopped --network fluent --env-file /opt/fluent/app.env \"$IMAGE_URI\"\ndocker image prune -af --filter 'until=168h'\ndocker rm -f fluent-proxy >/dev/null 2>&1 || true\ndocker run -d --name fluent-proxy --restart unless-stopped --network fluent -p 80:80 -v /opt/fluent/Caddyfile:/etc/caddy/Caddyfile:ro caddy:2.10-alpine\nDEPLOY_SCRIPT`,
       "chmod 700 /opt/fluent/deploy.sh",
     );
 
@@ -142,12 +134,39 @@ class FluentAwsStack extends cdk.Stack {
     instance.node.addDependency(migration);
     cdk.Tags.of(instance).add("Name", "fluent-production");
 
-    new ec2.CfnEIPAssociation(this, "ApplicationIpAssociation", {
+    const ipAssociation = new ec2.CfnEIPAssociation(this, "ApplicationIpAssociation", {
       allocationId: elasticIp.attrAllocationId,
       instanceId: instance.instanceId,
     });
 
-    new cdk.CfnOutput(this, "ApplicationUrl", { value: publicUrl });
+    const originDomainName = cdk.Fn.join(".", [
+      `ec2-${cdk.Fn.join("-", cdk.Fn.split(".", elasticIp.attrPublicIp))}`,
+      this.region,
+      `compute.${this.urlSuffix}`,
+    ]);
+    const distribution = new cloudfront.Distribution(this, "Distribution", {
+      comment: "Fluent English Coach production",
+      defaultBehavior: {
+        origin: new origins.HttpOrigin(originDomainName, {
+          protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+          httpPort: 80,
+          customHeaders: {
+            "X-Fluent-Origin-Verify": originVerificationSecret.secretValue.unsafeUnwrap(),
+          },
+        }),
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        compress: true,
+      },
+      httpVersion: cloudfront.HttpVersion.HTTP2_AND_3,
+      priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
+    });
+    distribution.node.addDependency(ipAssociation);
+
+    new cdk.CfnOutput(this, "ApplicationUrl", { value: `https://${distribution.distributionDomainName}` });
+    new cdk.CfnOutput(this, "CloudFrontDistributionId", { value: distribution.distributionId });
     new cdk.CfnOutput(this, "ApplicationIp", { value: elasticIp.attrPublicIp });
     new cdk.CfnOutput(this, "ApplicationInstanceId", { value: instance.instanceId });
     new cdk.CfnOutput(this, "ApplicationImageUri", { value: image.imageUri });
@@ -179,15 +198,13 @@ function importedSecret(scope, id, secretName, completeArn) {
 const app = new cdk.App();
 const adminEmails = String(app.node.tryGetContext("adminEmails") ?? "").trim();
 if (!adminEmails) throw new Error("Pass at least one Google account with --context adminEmails=you@example.com");
-const appBaseUrl = String(app.node.tryGetContext("appBaseUrl") ?? "").trim();
 const instanceType = String(app.node.tryGetContext("instanceType") ?? "t3.small").trim();
 new FluentAwsStack(app, "FluentProduction", {
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION ?? "eu-central-1" },
   adminEmails,
-  appBaseUrl,
   instanceType,
   openAiSecretArn: String(app.node.tryGetContext("openAiSecretArn") ?? "").trim(),
   googleClientIdSecretArn: String(app.node.tryGetContext("googleClientIdSecretArn") ?? "").trim(),
   googleClientSecretSecretArn: String(app.node.tryGetContext("googleClientSecretSecretArn") ?? "").trim(),
-  description: "Fluent English coach: EC2, Aurora PostgreSQL, Data API, Google OAuth, and managed secrets",
+  description: "Fluent English coach: CloudFront, EC2, Aurora PostgreSQL, Data API, Google OAuth, and managed secrets",
 });

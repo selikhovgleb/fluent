@@ -39,6 +39,8 @@ test("production deploy uses branch-scoped GitHub OIDC and a live health check",
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /configure-aws-credentials@v6\.2\.3/);
   assert.match(workflow, /\/api\/health/);
+  assert.match(workflow, /OutputKey=='ApplicationUrl'/);
+  assert.match(workflow, /deploy\.sh '\$IMAGE_URI' '\$APP_URL'/);
   assert.doesNotMatch(workflow, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/);
   assert.match(bootstrap, /repo:\$\{githubOwner\}@\$\{githubOwnerId\}\/\$\{githubRepository\}@\$\{githubRepositoryId\}:ref:refs\/heads\/\$\{githubBranch\}/);
   assert.match(bootstrap, /token\.actions\.githubusercontent\.com:aud/);
@@ -74,6 +76,12 @@ test("AWS runtime uses PostgreSQL Data API, managed secrets, and Google OAuth", 
   assert.match(infrastructure, /fetch_secret\(\)/);
   assert.match(infrastructure, /image\.repository\.grantPull/);
   assert.match(infrastructure, /userDataCausesReplacement: true/);
+  assert.match(infrastructure, /new cloudfront\.Distribution/);
+  assert.match(infrastructure, /CachePolicy\.CACHING_DISABLED/);
+  assert.match(infrastructure, /OriginRequestPolicy\.ALL_VIEWER_EXCEPT_HOST_HEADER/);
+  assert.match(infrastructure, /ViewerProtocolPolicy\.REDIRECT_TO_HTTPS/);
+  assert.match(infrastructure, /X-Fluent-Origin-Verify/);
   assert.doesNotMatch(infrastructure, /Port\.tcp\(22\)/);
+  assert.doesNotMatch(infrastructure, /Port\.tcp\(443\)/);
   assert.doesNotMatch(database, /cloudflare:workers|drizzle-orm\/d1/);
 });
