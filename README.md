@@ -60,7 +60,7 @@ Before the first app deployment, create these three **Other type of secret** val
 
 Create the Google client in Google Cloud Console with application type **Web application**. You can initially add the local callback `http://localhost:3000/api/auth/callback/google`; add the remote callback after AWS produces the application URL.
 
-Do not commit these values or add them to GitHub Actions. The EC2 instance reads them directly from Secrets Manager using its IAM role. CDK generates the Auth.js secret and database credential securely.
+Do not commit these values or add them to GitHub Actions. The EC2 instance reads them directly from Secrets Manager using its IAM role. The retained `fluent-production/auth-secret` from the original deployment is imported rather than recreated; do not delete it. CDK generates the database credential and a separately named CloudFront origin-verification secret.
 
 ### 3. Create the GitHub OIDC deploy role
 

@@ -59,8 +59,12 @@ class FluentAwsStack extends cdk.Stack {
     const openAiKey = importedSecret(this, "OpenAiKey", "fluent-production/openai-api-key", props.openAiSecretArn);
     const googleClientId = importedSecret(this, "GoogleClientId", "fluent-production/google-client-id", props.googleClientIdSecretArn);
     const googleClientSecret = importedSecret(this, "GoogleClientSecret", "fluent-production/google-client-secret", props.googleClientSecretSecretArn);
-    const authSecret = generatedSecret(this, "AuthSecret", "fluent-production/auth-secret", 64);
-    const originVerificationSecret = generatedSecret(this, "OriginVerificationSecret", "fluent-production/origin-verification", 48);
+    // This fixed-name secret was retained by the original App Runner stack. Import it so retries
+    // preserve user sessions and never attempt to create a duplicate physical secret.
+    const authSecret = importedSecret(this, "AuthSecret", "fluent-production/auth-secret", props.authSecretArn);
+    // Do not assign a physical name to generated retained secrets. A failed stack can then be
+    // retried without colliding with an orphaned secret from the rolled-back deployment.
+    const originVerificationSecret = generatedSecret(this, "OriginVerificationSecret", 48);
 
     const migrationHandler = new lambda.Function(this, "MigrationHandler", {
       runtime: lambda.Runtime.NODEJS_22_X,
@@ -181,9 +185,8 @@ function shellSingleQuote(value) {
   return value.replaceAll("'", "'\\''");
 }
 
-function generatedSecret(scope, id, secretName, passwordLength) {
+function generatedSecret(scope, id, passwordLength) {
   return new secretsmanager.Secret(scope, id, {
-    secretName,
     generateSecretString: { passwordLength, excludePunctuation: true },
     removalPolicy: cdk.RemovalPolicy.RETAIN,
   });
@@ -206,5 +209,6 @@ new FluentAwsStack(app, "FluentProduction", {
   openAiSecretArn: String(app.node.tryGetContext("openAiSecretArn") ?? "").trim(),
   googleClientIdSecretArn: String(app.node.tryGetContext("googleClientIdSecretArn") ?? "").trim(),
   googleClientSecretSecretArn: String(app.node.tryGetContext("googleClientSecretSecretArn") ?? "").trim(),
+  authSecretArn: String(app.node.tryGetContext("authSecretArn") ?? "").trim(),
   description: "Fluent English coach: CloudFront, EC2, Aurora PostgreSQL, Data API, Google OAuth, and managed secrets",
 });
