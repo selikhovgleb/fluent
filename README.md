@@ -34,11 +34,11 @@ aws sts get-caller-identity
 npm ci
 ```
 
-The examples use `eu-central-1`. Select another region only after confirming that it supports Aurora PostgreSQL Serverless v2, RDS Data API, and App Runner.
+This project is configured for AWS Europe (Stockholm), `eu-north-1`. Keep CDK, Secrets Manager, and GitHub Actions in this same region.
 
 ```powershell
 $AwsAccount = aws sts get-caller-identity --query Account --output text
-$AwsRegion = "eu-central-1"
+$AwsRegion = "eu-north-1"
 $env:CDK_DEFAULT_ACCOUNT = $AwsAccount
 $env:CDK_DEFAULT_REGION = $AwsRegion
 npx cdk bootstrap "aws://$AwsAccount/$AwsRegion"
@@ -81,7 +81,7 @@ Open **GitHub → selikhovgleb/fluent → Settings → Secrets and variables →
 | Variable | Value |
 | --- | --- |
 | `AWS_DEPLOY_ROLE_ARN` | `GitHubDeployRoleArn` from step 3 |
-| `AWS_REGION` | `eu-central-1` (or your selected region) |
+| `AWS_REGION` | `eu-north-1` |
 | `ADMIN_EMAILS` | Google email(s) allowed into `/admin`, comma-separated |
 | `APP_BASE_URL` | Optional custom-domain HTTPS URL; leave unset for the App Runner URL |
 
