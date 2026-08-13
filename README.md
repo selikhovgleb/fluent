@@ -1,6 +1,6 @@
 # Fluent English Coach
 
-Fluent is a production Next.js application for AI writing correction and vocabulary review. It runs on AWS App Runner, stores user data in Aurora PostgreSQL Serverless v2 through the RDS Data API, and uses Google OAuth through Auth.js.
+Fluent is a production Next.js application for AI writing correction and vocabulary review. It runs as a Docker container on Amazon EC2, stores user data in Aurora PostgreSQL Serverless v2 through the RDS Data API, and uses Google OAuth through Auth.js.
 
 ## What is real today
 
@@ -14,19 +14,22 @@ Fluent is a production Next.js application for AI writing correction and vocabul
 
 ## AWS architecture
 
-- **App Runner** serves the container over public HTTPS.
+- **EC2** runs the application container on Amazon Linux 2023. The default instance type is `t3.small`.
+- **Elastic IP** keeps the server address stable when the instance is replaced.
+- **Caddy** reverse-proxies the application and obtains/renews HTTPS certificates after a domain is configured.
 - **ECR** stores immutable application images built by CDK.
 - **Aurora PostgreSQL Serverless v2** stores user, correction, and vocabulary data in private isolated subnets.
-- **RDS Data API** connects App Runner to PostgreSQL without exposing the database publicly.
+- **RDS Data API** connects EC2 to PostgreSQL without exposing the database publicly.
 - **Secrets Manager** stores OpenAI, Google OAuth, Auth.js, and database credentials.
 - **Lambda + a CloudFormation custom resource** apply versioned SQL migrations.
+- **Systems Manager** deploys and administers the instance without SSH or an inbound port 22.
 - **GitHub Actions + AWS OIDC** deploy every push/merge to `main` without long-lived AWS access keys in GitHub.
 
 ## One-time production setup
 
 ### 1. Prerequisites
 
-Install Node.js 22.13+, Docker Desktop (Linux containers), AWS CLI v2, and Git. Configure an AWS identity with permission to bootstrap CDK and create the resources above.
+Install Node.js 22.13+, Docker Desktop (Linux containers), AWS CLI v2, and Git. Configure an AWS identity with permission to bootstrap CDK and create the resources above. You also need a domain or subdomain that you can point to the Elastic IP; Google OAuth cannot use the temporary HTTP IP address as its production callback.
 
 ```powershell
 aws configure
@@ -34,7 +37,7 @@ aws sts get-caller-identity
 npm ci
 ```
 
-This project is configured for AWS Europe (Frankfurt), `eu-central-1`, because App Runner is not available in Stockholm. Keep the application stack, Secrets Manager, and GitHub Actions in Frankfurt.
+This deployment remains configured for AWS Europe (Frankfurt), `eu-central-1`, so it uses the Secrets Manager values and CDK bootstrap resources already created there. EC2 is available in Stockholm, but changing regions now would require recreating or migrating the regional resources.
 
 ```powershell
 $AwsAccount = aws sts get-caller-identity --query Account --output text
@@ -56,7 +59,7 @@ Before the first app deployment, create these three **Other type of secret** val
 
 Create the Google client in Google Cloud Console with application type **Web application**. You can initially add the local callback `http://localhost:3000/api/auth/callback/google`; add the remote callback after AWS produces the application URL.
 
-Do not commit these values or add them to GitHub Actions. App Runner reads them directly from Secrets Manager. CDK generates the Auth.js secret and database credential securely.
+Do not commit these values or add them to GitHub Actions. The EC2 instance reads them directly from Secrets Manager using its IAM role. CDK generates the Auth.js secret and database credential securely.
 
 ### 3. Create the GitHub OIDC deploy role
 
@@ -65,6 +68,8 @@ Run the one-time CI bootstrap using your administrator AWS identity:
 ```powershell
 npm run aws:ci-bootstrap -- --context githubRepo="selikhovgleb/fluent" --context githubOwnerId="36789374" --context githubRepositoryId="1331360323" --context githubBranch="main" --context deploymentRegion="eu-central-1"
 ```
+
+Run this command again once after upgrading an existing App Runner deployment. It adds the narrowly scoped Systems Manager permissions that GitHub Actions needs to roll out images on EC2.
 
 Copy the `GitHubDeployRoleArn` output. The trust policy accepts only the immutable GitHub identity for the `selikhovgleb/fluent` repository's `main` branch and the standard AWS audience. The owner and repository IDs protect this trust across renames and prevent recycled names from inheriting access.
 
@@ -83,11 +88,11 @@ Open **GitHub → selikhovgleb/fluent → Settings → Secrets and variables →
 | `AWS_DEPLOY_ROLE_ARN` | `GitHubDeployRoleArn` from step 3 |
 | `AWS_REGION` | `eu-central-1` |
 | `ADMIN_EMAILS` | Google email(s) allowed into `/admin`, comma-separated |
-| `APP_BASE_URL` | Optional custom-domain HTTPS URL; leave unset for the App Runner URL |
+| `APP_BASE_URL` | Production HTTPS origin, for example `https://english.example.com`; leave unset for the initial IP-only deployment |
 
 These are identifiers/configuration, not credentials. No AWS access-key GitHub secrets are needed.
 
-### 5. Trigger the first deployment
+### 5. Deploy EC2 and obtain its stable IP
 
 The workflow at `.github/workflows/deploy-production.yml` runs for every push to `main`, including merged pull requests. It performs:
 
@@ -95,26 +100,44 @@ The workflow at `.github/workflows/deploy-production.yml` runs for every push to
 2. lint and production build/tests
 3. AWS authentication with a short-lived GitHub OIDC token
 4. required-secret existence checks
-5. CDK synthesis and deployment
-6. a live `GET /api/health` check against the App Runner URL
+5. CDK synthesis and infrastructure deployment
+6. an in-place container rollout through Systems Manager
+7. a live `GET /api/health` check
 
-Trigger it from the **Actions** tab with **Run workflow**, or merge/push to `main`. The successful run summary contains the public application URL.
+For the first deployment, leave `APP_BASE_URL` unset. Trigger the workflow from the **Actions** tab with **Run workflow**, or merge/push to `main`. Read the stable IP from the stack output:
 
-### 6. Finish Google OAuth
+```powershell
+aws cloudformation describe-stacks --stack-name FluentProduction --query "Stacks[0].Outputs[?OutputKey=='ApplicationIp'].OutputValue" --output text
+```
 
-Read the deployed URL if needed:
+The application is temporarily reachable at `http://ELASTIC_IP`, but Google sign-in is not ready yet.
+
+### 6. Configure DNS, HTTPS, and Google OAuth
+
+Create an `A` record with your DNS provider, pointing your chosen hostname (for example `english.example.com`) to `ApplicationIp`. Wait until the record resolves, then set the GitHub repository variable:
+
+```text
+APP_BASE_URL=https://english.example.com
+```
+
+In the Google Web OAuth client, add:
+
+| Setting | Value |
+| --- | --- |
+| Authorized JavaScript origin | `https://english.example.com` |
+| Authorized redirect URI | `https://english.example.com/api/auth/callback/google` |
+
+Run the production workflow again. CDK applies the domain configuration, Caddy obtains the HTTPS certificate, and the health check verifies the HTTPS URL. Read the active URL at any time with:
 
 ```powershell
 aws cloudformation describe-stacks --stack-name FluentProduction --query "Stacks[0].Outputs[?OutputKey=='ApplicationUrl'].OutputValue" --output text
 ```
 
-Add the following authorized redirect URI to the Google Web OAuth client:
+If you change a Google credential or another application secret in Secrets Manager, run the workflow again so the container refreshes its environment.
 
-```text
-https://YOUR-APP-RUNNER-URL/api/auth/callback/google
-```
+### 7. Optional EC2 sizing
 
-If you changed either Google credential value in Secrets Manager, start another workflow deployment so App Runner receives the current secret values.
+The default instance is `t3.small` (2 GiB RAM). Override it during a manual synth/deploy with `--context instanceType=t3.micro` or another compatible x86 instance type. Keep `t3.small` initially; the Docker build happens in GitHub Actions/CDK, but Next.js, Caddy, Docker, and the operating system still share the instance memory.
 
 ## Local development
 
@@ -145,9 +168,9 @@ npx cdk synth --app "node infra/ci-bootstrap.mjs"
 
 ## Cost and safety
 
-- Aurora has deletion protection and snapshot removal policy; App Runner keeps one warm instance. Both create ongoing AWS charges.
-- App Runner, ECR, Secrets Manager, CloudWatch, data transfer, and OpenAI usage are billable.
+- Aurora has deletion protection and a snapshot removal policy. Aurora, the EC2 instance, its EBS volume, Elastic IP usage, ECR, Secrets Manager, CloudWatch, data transfer, and OpenAI usage can create charges.
+- The single EC2 host is a single point of failure. Docker restarts containers after a process or machine restart, but this MVP does not yet include a load balancer, multiple instances, or zero-downtime deployments.
 - Set an AWS Budget and billing alert before production use.
-- The database has no public endpoint, and the GitHub deployment role can only assume this account's CDK bootstrap roles plus perform narrow preflight reads.
+- Only ports 80 and 443 are public. The database has no public endpoint, port 22 is closed, and operational commands use Systems Manager with IAM authorization.
 
-Official references: [GitHub OIDC for AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws), [AWS credentials action](https://github.com/aws-actions/configure-aws-credentials), [App Runner image services](https://docs.aws.amazon.com/apprunner/latest/dg/service-source-image.html), [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.create.html), and [RDS Data API](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.html).
+Official references: [GitHub OIDC for AWS](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws), [AWS credentials action](https://github.com/aws-actions/configure-aws-credentials), [Systems Manager Run Command](https://docs.aws.amazon.com/systems-manager/latest/userguide/run-command.html), [Aurora Serverless v2](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.create.html), and [RDS Data API](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/data-api.html).

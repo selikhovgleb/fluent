@@ -70,6 +70,10 @@ test("AWS runtime uses PostgreSQL Data API, managed secrets, and Google OAuth", 
   assert.match(proxy, /AUTH_REQUIRED/);
   assert.match(proxy, /api\/auth\|api\/health/);
   assert.match(infrastructure, /enableDataApi: true/);
-  assert.match(infrastructure, /runtimeEnvironmentSecrets/);
+  assert.match(infrastructure, /AmazonSSMManagedInstanceCore/);
+  assert.match(infrastructure, /fetch_secret\(\)/);
+  assert.match(infrastructure, /image\.repository\.grantPull/);
+  assert.match(infrastructure, /userDataCausesReplacement: true/);
+  assert.doesNotMatch(infrastructure, /Port\.tcp\(22\)/);
   assert.doesNotMatch(database, /cloudflare:workers|drizzle-orm\/d1/);
 });

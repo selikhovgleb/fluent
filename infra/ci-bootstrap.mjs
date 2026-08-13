@@ -48,6 +48,17 @@ class FluentCiBootstrapStack extends cdk.Stack {
         `arn:${this.partition}:secretsmanager:${deploymentRegion}:${this.account}:secret:fluent-production/google-client-secret-*`,
       ],
     }));
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: ["ssm:SendCommand"],
+      resources: [
+        `arn:${this.partition}:ssm:${deploymentRegion}::document/AWS-RunShellScript`,
+        `arn:${this.partition}:ec2:${deploymentRegion}:${this.account}:instance/*`,
+      ],
+    }));
+    role.addToPolicy(new iam.PolicyStatement({
+      actions: ["ssm:GetCommandInvocation"],
+      resources: ["*"],
+    }));
 
     new cdk.CfnOutput(this, "GitHubDeployRoleArn", { value: role.roleArn });
     new cdk.CfnOutput(this, "TrustedSubject", { value: trustedSubject });

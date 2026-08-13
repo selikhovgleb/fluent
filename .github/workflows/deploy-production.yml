@@ -71,6 +71,38 @@ jobs:
           if [ -n "$APP_BASE_URL" ]; then CONTEXT+=(--context "appBaseUrl=$APP_BASE_URL"); fi
           npm run aws:deploy -- "${CONTEXT[@]}"
 
+      - name: Roll out image on EC2
+        run: |
+          INSTANCE_ID=$(aws cloudformation describe-stacks --stack-name FluentProduction --query "Stacks[0].Outputs[?OutputKey=='ApplicationInstanceId'].OutputValue" --output text)
+          IMAGE_URI=$(aws cloudformation describe-stacks --stack-name FluentProduction --query "Stacks[0].Outputs[?OutputKey=='ApplicationImageUri'].OutputValue" --output text)
+          test -n "$INSTANCE_ID"
+          test -n "$IMAGE_URI"
+
+          DEPLOY_COMMAND="for attempt in \$(seq 1 60); do if [ -x /opt/fluent/deploy.sh ]; then sudo /opt/fluent/deploy.sh '$IMAGE_URI'; exit \$?; fi; sleep 5; done; exit 1"
+          PARAMETERS=$(jq -cn --arg command "$DEPLOY_COMMAND" '{commands:[$command]}')
+          COMMAND_ID=""
+          for attempt in $(seq 1 30); do
+            if COMMAND_ID=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name AWS-RunShellScript --parameters "$PARAMETERS" --query Command.CommandId --output text 2>/dev/null); then
+              break
+            fi
+            sleep 10
+          done
+          test -n "$COMMAND_ID"
+
+          for attempt in $(seq 1 90); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" --query Status --output text 2>/dev/null || true)
+            case "$STATUS" in
+              Success) exit 0 ;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          echo "Timed out waiting for EC2 deployment command $COMMAND_ID" >&2
+          exit 1
+
       - name: Verify production health
         id: health
         run: |
