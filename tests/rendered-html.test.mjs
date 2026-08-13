@@ -69,6 +69,7 @@ test("AWS runtime uses PostgreSQL Data API, managed secrets, and Google OAuth", 
   ]);
   assert.match(database, /aws-data-api\/pg/);
   assert.match(auth, /next-auth\/providers\/google/);
+  assert.match(auth, /process\.env\.AUTH_URL = process\.env\.APP_BASE_URL/);
   assert.match(proxy, /AUTH_REQUIRED/);
   assert.match(proxy, /api\/auth\|api\/health/);
   assert.match(infrastructure, /enableDataApi: true/);
@@ -81,6 +82,7 @@ test("AWS runtime uses PostgreSQL Data API, managed secrets, and Google OAuth", 
   assert.match(infrastructure, /OriginRequestPolicy\.ALL_VIEWER_EXCEPT_HOST_HEADER/);
   assert.match(infrastructure, /ViewerProtocolPolicy\.REDIRECT_TO_HTTPS/);
   assert.match(infrastructure, /X-Fluent-Origin-Verify/);
+  assert.match(infrastructure, /AUTH_URL=\$APP_URL/);
   assert.match(infrastructure, /authSecret = importedSecret/);
   assert.match(infrastructure, /generatedSecret\(this, "OriginVerificationSecret", 48\)/);
   assert.doesNotMatch(infrastructure, /generatedSecret\(this, "AuthSecret"/);

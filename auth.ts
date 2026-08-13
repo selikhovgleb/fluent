@@ -1,6 +1,12 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
 
+// Auth.js otherwise derives redirects from the container's internal HOSTNAME
+// (0.0.0.0:3000). AWS supplies the public CloudFront URL as APP_BASE_URL.
+if (!process.env.AUTH_URL && process.env.APP_BASE_URL) {
+  process.env.AUTH_URL = process.env.APP_BASE_URL;
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Google({
