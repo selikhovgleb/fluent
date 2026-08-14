@@ -8,6 +8,7 @@ if (!process.env.AUTH_URL && process.env.APP_BASE_URL) {
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
+  pages: { signIn: "/login" },
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,

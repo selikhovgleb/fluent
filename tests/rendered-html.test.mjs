@@ -60,6 +60,26 @@ test("admin dashboard is protected and never selects sentence content", async ()
   assert.doesNotMatch(dashboard, /SELECT[^`]*corrected_text/i);
 });
 
+test("custom login keeps Google live while email authentication stays frontend-only", async () => {
+  const [auth, proxy, page, experience, actions] = await Promise.all([
+    readFile(new URL("../auth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../proxy.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/login/login-experience.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/login/actions.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(auth, /pages: \{ signIn: "\/login" \}/);
+  assert.match(proxy, /new URL\("\/login"/);
+  assert.match(proxy, /api\/auth\|api\/health\|login/);
+  assert.match(page, /safeCallbackUrl/);
+  assert.match(actions, /await signIn\("google", \{ redirectTo \}\)/);
+  assert.match(experience, /Continue with Google/);
+  assert.match(experience, /Create account/);
+  assert.match(experience, /handleLocalAuth/);
+  assert.doesNotMatch(experience, /fetch\(|axios|\/api\/signup|\/api\/login/);
+});
+
 test("AWS runtime uses PostgreSQL Data API, managed secrets, and Google OAuth", async () => {
   const [database, auth, proxy, infrastructure] = await Promise.all([
     readFile(new URL("../db/index.ts", import.meta.url), "utf8"),

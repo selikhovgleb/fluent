@@ -3,7 +3,7 @@ import { getCurrentUser } from "./current-user";
 
 export async function requireGoogleUser(returnTo: string) {
   const user = await getCurrentUser();
-  if (!user) redirect(`/api/auth/signin?callbackUrl=${encodeURIComponent(returnTo)}`);
+  if (!user) redirect(`/login?callbackUrl=${encodeURIComponent(returnTo)}`);
   return user;
 }
 
